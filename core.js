@@ -225,6 +225,24 @@
     return now;
   }
 
+  function estimateRelativeSeek(input = {}) {
+    if (input.sameMedia !== true) return null;
+    const baselineGlobalSeconds = Number(input.baselineGlobalSeconds);
+    const baselineLocalSeconds = Number(input.baselineLocalSeconds);
+    const currentLocalSeconds = Number(input.currentLocalSeconds);
+    if (![baselineGlobalSeconds, baselineLocalSeconds, currentLocalSeconds].every(Number.isFinite)) {
+      return null;
+    }
+
+    const minimumJumpSeconds = Math.max(0.1, Number(input.minimumJumpSeconds) || 0.75);
+    const maxDeltaSeconds = Math.max(minimumJumpSeconds, Number(input.maxDeltaSeconds) || 30);
+    const deltaSeconds = currentLocalSeconds - baselineLocalSeconds;
+    if (Math.abs(deltaSeconds) < minimumJumpSeconds || Math.abs(deltaSeconds) > maxDeltaSeconds) {
+      return null;
+    }
+    return Math.max(0, baselineGlobalSeconds + deltaSeconds);
+  }
+
   function createPlaybackClock() {
     let anchorSeconds = null;
     let anchorNowMs = 0;
@@ -499,6 +517,7 @@
     dedupeCues,
     parseAccessibleClock,
     parseTimelineClock,
+    estimateRelativeSeek,
     createPlaybackClock,
     createSeekGate,
     tokenizeEnglish,

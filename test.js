@@ -47,6 +47,28 @@ assert.equal(clock.snapshot().source, "status");
 clock.calibrate({ seconds: 2822, nowMs: 60_000, playing: true, rate: 1.25, source: "timeline" });
 closeTo(clock.read(62_000), 2824.5);
 
+// Disney's +/-10 second controls can seek while the accessible episode clock
+// is temporarily hidden. The local media clock is not an absolute episode
+// clock, but its delta on the same video element is safe to apply immediately.
+closeTo(core.estimateRelativeSeek({
+  baselineGlobalSeconds: 1_400,
+  baselineLocalSeconds: 42.25,
+  currentLocalSeconds: 52.25,
+  sameMedia: true
+}), 1_410);
+closeTo(core.estimateRelativeSeek({
+  baselineGlobalSeconds: 1_400,
+  baselineLocalSeconds: 42.25,
+  currentLocalSeconds: 32.25,
+  sameMedia: true
+}), 1_390);
+assert.equal(core.estimateRelativeSeek({
+  baselineGlobalSeconds: 1_400,
+  baselineLocalSeconds: 42.25,
+  currentLocalSeconds: 52.25,
+  sameMedia: false
+}), null, "A replacement media period must not reuse the old local clock");
+
 const seekGate = core.createSeekGate({ settleMs: 60, minimumJump: 0.75 });
 seekGate.begin({ seconds: 100, nowMs: 1_000 });
 assert.equal(seekGate.canRender({ seconds: 100, nowMs: 1_020, segmentsReady: true }), false);
@@ -252,8 +274,9 @@ const pageAdapterSource = fs.readFileSync(path.join(__dirname, "page-adapter.js"
 assert.match(pageAdapterSource, /const seekGate = core\.createSeekGate/);
 assert.match(pageAdapterSource, /addEventListener\("seeking", onSeeking/);
 assert.match(pageAdapterSource, /seekGate\.canRender\(/);
+assert.match(pageAdapterSource, /core\.estimateRelativeSeek\(/);
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.1.0");
+assert.equal(manifest.version, "1.1.1");
 for (const script of [
   manifest.background.service_worker,
   manifest.action.default_popup,
@@ -265,14 +288,15 @@ for (const script of [
 async function testBackgroundRefreshesOpenDisneyTabs() {
   const backgroundSource = fs.readFileSync(path.join(__dirname, "background.js"), "utf8");
   let onInstalled = null;
+  let onMessage = null;
   const queried = [];
   const reloaded = [];
   const localWrites = [];
   const chrome = {
     runtime: {
       onInstalled: { addListener(listener) { onInstalled = listener; } },
-      onMessage: { addListener() {} },
-      getManifest() { return { version: "1.1.0" }; }
+      onMessage: { addListener(listener) { onMessage = listener; } },
+      getManifest() { return { version: "1.1.1" }; }
     },
     storage: {
       sync: {
@@ -323,6 +347,14 @@ async function testBackgroundRefreshesOpenDisneyTabs() {
     localWrites.some((value) => value.languageLensAutoRefresh?.reloadedTabIds?.includes(77)),
     "Background must persist proof that the open Disney tab was refreshed"
   );
+
+  const manualResponse = await new Promise((resolve) => {
+    assert.equal(onMessage({ type: "refresh-disney-tabs" }, {}, resolve), true);
+  });
+  assert.equal(manualResponse.ok, true);
+  assert.equal(manualResponse.result.reason, "manual");
+  assert.equal(manualResponse.result.matchedTabs, 1);
+  assert.deepEqual(reloaded, [77, 77]);
 }
 
 async function testBackgroundUsesContextAndSafeFallbacks() {
@@ -354,7 +386,7 @@ async function testBackgroundUsesContextAndSafeFallbacks() {
     runtime: {
       onInstalled: { addListener() {} },
       onMessage: { addListener(listener) { onMessage = listener; } },
-      getManifest() { return { version: "1.1.0" }; }
+      getManifest() { return { version: "1.1.1" }; }
     },
     storage: {
       sync: { async get(defaults) { return defaults; }, async set() {} },
@@ -438,7 +470,7 @@ Promise.resolve()
   .then(testBackgroundRefreshesOpenDisneyTabs)
   .then(testBackgroundUsesContextAndSafeFallbacks)
   .then(() => {
-    console.log("Disney Language Lens 1.1.0 tests passed.");
+    console.log("Disney Language Lens 1.1.1 tests passed.");
   })
   .catch((error) => {
     console.error(error);

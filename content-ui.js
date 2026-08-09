@@ -4,7 +4,7 @@
   const core = globalThis.DisneyLanguageLensCore;
   const dictionary = globalThis.DisneyLanguageLensDictionary;
   const CHANNEL = "disney-language-lens:v1";
-  const BUILD_VERSION = "1.1.0";
+  const BUILD_VERSION = "1.1.1";
   const defaults = {
     enabled: true,
     chinese: "zh-Hans",

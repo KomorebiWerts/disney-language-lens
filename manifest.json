@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Disney+ 双语学习字幕",
   "description": "同步显示 Disney+ 官方英中字幕，并提供语境短语释义、音标、发音和跳转防错位。",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],
   "host_permissions": [

@@ -3,7 +3,7 @@
 
   const core = globalThis.DisneyLanguageLensCore;
   const CHANNEL = "disney-language-lens:v1";
-  const BUILD_VERSION = "1.1.0";
+  const BUILD_VERSION = "1.1.1";
   const originalFetch = window.fetch.bind(window);
   const originalXhrOpen = XMLHttpRequest.prototype.open;
   const defaults = {
@@ -28,6 +28,8 @@
   let lastHealthSecond = -1;
   let scanningExistingResources = false;
   let lastAbsoluteJumpAt = -Infinity;
+  let pendingSeekSample = null;
+  let lastSeekSync = null;
   const clock = core.createPlaybackClock();
   const seekGate = core.createSeekGate({ settleMs: 70, minimumJump: 0.75, maxHoldMs: 2200 });
 
@@ -84,10 +86,69 @@
     post("caption", { english: "", chinese: "", reason });
   }
 
-  function beginSeek(reason = "seeking") {
+  function captureRelativeSeekBaseline(nowMs) {
+    const playback = currentPlayback();
+    const globalSeconds = clock.read(nowMs);
+    const localSeconds = Number(playback.video?.currentTime);
+    if (!playback.video || !Number.isFinite(globalSeconds) || !Number.isFinite(localSeconds)) {
+      pendingSeekSample = null;
+      return false;
+    }
+    pendingSeekSample = {
+      video: playback.video,
+      globalSeconds,
+      localSeconds,
+      capturedAt: nowMs
+    };
+    return true;
+  }
+
+  function beginSeek(reason = "seeking", captureRelative = false) {
     const nowMs = performance.now();
+    if (captureRelative) captureRelativeSeekBaseline(nowMs);
     seekGate.begin({ seconds: clock.read(nowMs), nowMs });
     clearCaption(reason);
+  }
+
+  function applyRelativeVideoSeek(video) {
+    const sample = pendingSeekSample;
+    if (!sample || !video) return false;
+    const nowMs = performance.now();
+    if (nowMs - sample.capturedAt > 1500) {
+      pendingSeekSample = null;
+      return false;
+    }
+    const targetSeconds = core.estimateRelativeSeek({
+      baselineGlobalSeconds: sample.globalSeconds,
+      baselineLocalSeconds: sample.localSeconds,
+      currentLocalSeconds: video.currentTime,
+      sameMedia: video === sample.video,
+      minimumJumpSeconds: 0.75,
+      maxDeltaSeconds: 30
+    });
+    if (!Number.isFinite(targetSeconds)) return false;
+
+    const playing = !video.paused && !video.ended;
+    const rate = Number.isFinite(video.playbackRate) && video.playbackRate > 0 ? video.playbackRate : 1;
+    seekGate.calibrate({ seconds: targetSeconds, nowMs });
+    const calibrated = clock.calibrate({
+      seconds: targetSeconds,
+      nowMs,
+      playing,
+      rate,
+      source: "video-relative-seek"
+    });
+    if (!calibrated) return false;
+    playbackState = { playing, rate };
+    lastAbsoluteJumpAt = nowMs;
+    lastSeekSync = {
+      source: "video-relative-seek",
+      deltaSeconds: video.currentTime - sample.localSeconds,
+      targetSeconds,
+      updatedAt: Date.now()
+    };
+    pendingSeekSample = null;
+    return true;
   }
 
   function calibrateAbsolute(seconds, source) {
@@ -107,7 +168,20 @@
       rate: playback.rate,
       source
     });
-    if (calibrated) playbackState = { playing: playback.playing, rate: playback.rate };
+    if (calibrated) {
+      playbackState = { playing: playback.playing, rate: playback.rate };
+      if (pendingSeekSample && Math.abs(seconds - pendingSeekSample.globalSeconds) >= 0.75) {
+        pendingSeekSample = null;
+      }
+      if (!Number.isFinite(before) || Math.abs(before - seconds) > 2) {
+        lastSeekSync = {
+          source,
+          deltaSeconds: Number.isFinite(before) ? seconds - before : null,
+          targetSeconds: seconds,
+          updatedAt: Date.now()
+        };
+      }
+    }
     return calibrated;
   }
 
@@ -173,11 +247,17 @@
     };
     const onSeeking = () => {
       if (performance.now() - lastAbsoluteJumpAt > 300) beginSeek("video-seeking");
+      applyRelativeVideoSeek(video);
       syncPlaybackState();
       scheduleCalibration();
     };
+    const onSeeked = () => {
+      applyRelativeVideoSeek(video);
+      onState();
+    };
     video.addEventListener("seeking", onSeeking, { passive: true });
-    for (const eventName of ["play", "playing", "pause", "ratechange", "seeked", "loadedmetadata"] ) {
+    video.addEventListener("seeked", onSeeked, { passive: true });
+    for (const eventName of ["play", "playing", "pause", "ratechange", "loadedmetadata"] ) {
       video.addEventListener(eventName, onState, { passive: true });
     }
     onState();
@@ -205,28 +285,31 @@
     };
     begin();
 
-    const isSeekIntent = (target) => {
+    const classifySeekIntent = (target) => {
       const slider = target?.closest?.('[role="slider"][aria-valuenow][aria-valuemin][aria-valuemax]');
       if (slider && Number.isFinite(core.parseTimelineClock({
         now: slider.getAttribute("aria-valuenow"),
         min: slider.getAttribute("aria-valuemin"),
         max: slider.getAttribute("aria-valuemax")
-      }))) return true;
+      }))) return { seeking: true, relative: false };
       const control = target?.closest?.("button, [role=button]");
       const label = `${control?.getAttribute?.("aria-label") || ""} ${control?.getAttribute?.("title") || ""} ${control?.textContent || ""}`;
-      return /(?:10|ten)\s*(?:seconds?|秒)|(?:forward|rewind|快进|快退).*?(?:10|ten|秒)/i.test(label);
+      const relative = /(?:10|ten)\s*(?:seconds?|秒)|(?:forward|rewind|快进|快退).*?(?:10|ten|秒)/i.test(label);
+      return { seeking: relative, relative };
     };
     document.addEventListener("pointerdown", (event) => {
-      if (isSeekIntent(event.target)) beginSeek("pointer-seeking");
+      const intent = classifySeekIntent(event.target);
+      if (intent.seeking) beginSeek("pointer-seeking", intent.relative);
     }, true);
     document.addEventListener("pointerup", scheduleCalibration, true);
     document.addEventListener("click", (event) => {
-      if (isSeekIntent(event.target)) beginSeek("control-seeking");
+      if (classifySeekIntent(event.target).seeking) beginSeek("control-seeking");
       scheduleCalibration();
     }, true);
     document.addEventListener("keydown", (event) => {
       if (["ArrowLeft", "ArrowRight", "Home", "End", "j", "l", "J", "L"].includes(event.key)) {
-        beginSeek("keyboard-seeking");
+        const relative = ["ArrowLeft", "ArrowRight", "j", "l", "J", "L"].includes(event.key);
+        beginSeek("keyboard-seeking", relative);
         scheduleCalibration();
       }
     }, true);
@@ -439,6 +522,11 @@
         displayTime: core.formatClock(time),
         clockSource: snapshot.source,
         playing: snapshot.playing,
+        seekGateActive: seekGate.snapshot().active,
+        pendingRelativeSeek: Boolean(pendingSeekSample),
+        lastSeekSyncSource: lastSeekSync?.source || "",
+        lastSeekDelta: lastSeekSync?.deltaSeconds ?? null,
+        lastSeekTarget: lastSeekSync?.targetSeconds ?? null,
         englishTrack: activeTracks.english.name,
         chineseTrack: activeTracks.chinese.name,
         englishCueCount: activeTracks.english.cues.length,

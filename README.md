@@ -4,9 +4,16 @@
 
 ## 下载
 
-[下载最新版 v1.1.0](https://github.com/KomorebiWerts/disney-language-lens/raw/refs/heads/main/disney-language-lens-1.1.0.zip)
+[下载最新版 v1.1.1](https://github.com/KomorebiWerts/disney-language-lens/raw/refs/heads/main/disney-language-lens-1.1.1.zip)
 
-SHA-256：`89DD1923FEFB0F1FCF1C69086E4F0EF851F0DEA43B2C070238FBB179E398CF99`
+SHA-256：`3228B7BFDB27E2A887B89EFBC9C54D63EE4B834E75D112D86DC3DC772F6D1E04`
+
+## 1.1.1 更新
+
+- 修复播放中点击“前进 10 秒 / 后退 10 秒”后字幕要等暂停才同步的问题。
+- 跳转时先使用同一媒体节点的可靠时间差立即校准，再由 Disney 整集时间做精确复核。
+- Disney 更换媒体片段或视频节点时不会套用旧节点时间，避免跨片段误校准。
+- 新增真实 Edge 内核的连续 `+10 秒 → -10 秒` 无暂停回归测试。
 
 ## 1.1.0 更新
 
@@ -43,11 +50,12 @@ SHA-256：`89DD1923FEFB0F1FCF1C69086E4F0EF851F0DEA43B2C070238FBB179E398CF99`
 
 ```powershell
 node test.js
+powershell -NoProfile -ExecutionPolicy Bypass -File .\qa\run-seek-sync-check.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\qa\run-dom-rebuild-check.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\qa\run-word-card-check.ps1
 ```
 
-自动测试覆盖整集时间校准、远距离跳转、±10 秒旧字幕门控、官方 HLS/VTT 解析、DOM 重建恢复、网址污染拦截、短语提取、词性消歧和词卡渲染。
+自动测试覆盖整集时间校准、播放中 ±10 秒即时同步、远距离跳转、旧字幕门控、官方 HLS/VTT 解析、DOM 重建恢复、网址污染拦截、短语提取、词性消歧和词卡渲染。
 
 ## 说明
 

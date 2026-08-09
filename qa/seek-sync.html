@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Disney Language Lens seek sync QA</title>
+</head>
+<body data-result="pending">
+  <div class="text-to-speech-status">Playing at 1400000.</div>
+  <button id="forward" aria-label="Forward 10 seconds">Forward 10 seconds</button>
+  <button id="rewind" aria-label="Rewind 10 seconds">Rewind 10 seconds</button>
+  <div id="timeline" role="slider" aria-valuemin="0" aria-valuemax="3318" aria-valuenow="1400"></div>
+  <video id="player"></video>
+  <pre id="result">pending</pre>
+
+  <script>
+    const player = document.getElementById("player");
+    let localTime = 42.25;
+    Object.defineProperties(player, {
+      currentTime: { configurable: true, get: () => localTime },
+      paused: { configurable: true, get: () => false },
+      ended: { configurable: true, get: () => false },
+      playbackRate: { configurable: true, get: () => 1 },
+      readyState: { configurable: true, get: () => 4 },
+      clientWidth: { configurable: true, get: () => 1280 },
+      clientHeight: { configurable: true, get: () => 720 }
+    });
+
+    let stage = "forward";
+    const output = document.getElementById("result");
+    function fail(message) {
+      document.body.dataset.result = "fail";
+      output.textContent = message;
+    }
+    function requestClock() {
+      window.postMessage({
+        channel: "disney-language-lens:v1",
+        sender: "content-ui",
+        type: "status-request"
+      }, "*");
+    }
+    function performSeek(buttonId, delta) {
+      document.getElementById(buttonId).dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "mouse"
+      }));
+      localTime += delta;
+      player.dispatchEvent(new Event("seeking"));
+      player.dispatchEvent(new Event("seeked"));
+      setTimeout(requestClock, 120);
+    }
+    function performTimelineSeek() {
+      const timeline = document.getElementById("timeline");
+      timeline.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "mouse"
+      }));
+      localTime = 20.5;
+      timeline.setAttribute("aria-valuenow", "2800");
+      player.dispatchEvent(new Event("seeking"));
+      player.dispatchEvent(new Event("seeked"));
+      setTimeout(requestClock, 120);
+    }
+
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message?.channel !== "disney-language-lens:v1" ||
+          message?.sender !== "page-adapter" || message?.type !== "status") return;
+      const expectedSource = stage === "timeline" ? "timeline" : "video-relative-seek";
+      if (message.clockSource !== expectedSource) return;
+      const expected = stage === "forward" ? 1410 : stage === "rewind" ? 1400 : 2800;
+      if (Math.abs(message.globalTime - expected) > 0.6) {
+        fail(`${stage}: expected ${expected}, received ${message.globalTime}`);
+        return;
+      }
+      if (stage === "forward") {
+        stage = "rewind";
+        setTimeout(() => performSeek("rewind", -10), 50);
+        return;
+      }
+      if (stage === "rewind") {
+        stage = "timeline";
+        setTimeout(performTimelineSeek, 50);
+        return;
+      }
+      document.body.dataset.result = "pass";
+      output.textContent = `PASS: relative controls and ${message.clockSource} ${message.globalTime.toFixed(3)}`;
+    });
+
+    setTimeout(() => performSeek("forward", 10), 80);
+    setTimeout(() => {
+      if (document.body.dataset.result === "pending") fail("Timed out waiting for relative seek sync");
+    }, 1800);
+  </script>
+  <script src="../core.js"></script>
+  <script src="../page-adapter.js"></script>
+</body>
+</html>

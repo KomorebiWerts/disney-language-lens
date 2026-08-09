@@ -1,8 +1,13 @@
 // An unpacked Chromium extension keeps its old manifest until the extension is
 // reloaded. Opening this page is therefore also a safe upgrade bridge for the
 // already-installed Chrome/Edge copy that points at this folder.
-if (chrome.runtime.getManifest().version !== "1.1.0") {
+const popupParams = new URLSearchParams(location.search);
+const forceReload = popupParams.get("forceReload") === "1";
+if (chrome.runtime.getManifest().version !== "1.1.1" || forceReload) {
+  if (forceReload) history.replaceState(null, "", `${location.pathname}?reloaded=1`);
   chrome.runtime.reload();
+} else if (popupParams.get("refreshDisney") === "1") {
+  chrome.runtime.sendMessage({ type: "refresh-disney-tabs" }).catch(() => {});
 }
 
 const defaults = {

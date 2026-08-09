@@ -164,16 +164,16 @@ async function refreshOpenDisneyTabs(details = {}) {
     const target = result.status === "fulfilled" ? reloadedTabIds : failedTabIds;
     target.push(disneyTabs[index].id);
   });
-  await chrome.storage.local.set({
-    languageLensAutoRefresh: {
-      version: chrome.runtime.getManifest().version,
-      reason: details.reason || "unknown",
-      matchedTabs: disneyTabs.length,
-      reloadedTabIds,
-      failedTabIds,
-      updatedAt: Date.now()
-    }
-  });
+  const result = {
+    version: chrome.runtime.getManifest().version,
+    reason: details.reason || "unknown",
+    matchedTabs: disneyTabs.length,
+    reloadedTabIds,
+    failedTabIds,
+    updatedAt: Date.now()
+  };
+  await chrome.storage.local.set({ languageLensAutoRefresh: result });
+  return result;
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -184,6 +184,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "refresh-disney-tabs") {
+    refreshOpenDisneyTabs({ reason: "manual" })
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "刷新失败" }));
+    return true;
+  }
   if (message?.type === "lookup-context" || message?.type === "lookup-word") {
     lookupContext(message.type === "lookup-word"
       ? { ...message, query: message.word, mode: "word" }
