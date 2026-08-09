@@ -4,7 +4,7 @@
 
 ## 下载
 
-[下载最新版 v1.0.3](https://github.com/KomorebiWerts/disney-language-lens/releases/latest/download/disney-language-lens-1.0.3.zip)
+[下载最新版 v1.0.3](https://github.com/KomorebiWerts/disney-language-lens/raw/refs/heads/main/disney-language-lens-1.0.3.zip)
 
 SHA-256：`81582E189D6D4F31EE0EF48B9443EF610000BB3279DDAA9D20E0178088F4A41D`
 
