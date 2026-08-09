@@ -23,7 +23,9 @@
 <body>
   <div class="frame"><div class="figure one"></div><div class="figure two"></div></div>
   <div class="time">30:27 / 55:18</div>
+  <pre id="qa-output" hidden></pre>
   <script>
+    window.Translator = undefined;
     window.chrome = {
       storage: {
         sync: {
@@ -37,15 +39,19 @@
         }
       },
       runtime: {
-        sendMessage: async ({ word }) => ({
+        sendMessage: async ({ word, query, mode }) => ({
           ok: true,
           result: {
             word,
-            chinese: word === "variant" ? "变体；时间犯" : "结束；结局",
-            phonetic: word === "variant" ? "/ˈvɛəriənt/" : "/end/",
-            partOfSpeech: "noun",
-            definition: word === "variant" ? "Something slightly different from a type or norm." : "The final part of something.",
-            example: word === "variant" ? "This Variant left the Sacred Timeline." : "How does it all end?",
+            query,
+            mode,
+            chinese: mode === "word" ? "居高临下的；屈尊俯就的" : "很居高临下，带着优越感",
+            phonetic: "/ˈpætrənaɪzɪŋ/",
+            partOfSpeech: "adjective",
+            definition: "Offensively condescending; treating someone as if they were less intelligent.",
+            example: "Yes, it was quite patronizing.",
+            translationSource: "browser-local",
+            cached: false,
             audio: ""
           }
         })
@@ -53,6 +59,7 @@
     };
   </script>
   <script src="../core.js"></script>
+  <script src="../dictionary-core.js"></script>
   <script src="../content-ui.js"></script>
   <script>
     setTimeout(() => {
@@ -70,9 +77,34 @@
         channel: "disney-language-lens:v1",
         sender: "page-adapter",
         type: "caption",
-        english: "How does it all end? Every Variant has a choice.",
-        chinese: "那这一切怎么结束？每个时间犯都有选择。"
+        english: "Yes, it was quite patronizing. I thought it was a bit too far, actually.",
+        chinese: "是的，你这是自以为高人一等。我其实觉得挺过分的。"
       }, "*");
+      setTimeout(() => {
+        const root = document.getElementById("disney-language-lens-root")?.shadowRoot;
+        const target = [...(root?.querySelectorAll("button.word") || [])]
+          .find((button) => button.dataset.lookup === "patronizing");
+        target?.click();
+        setTimeout(() => {
+          const card = root?.querySelector(".card");
+          const result = {
+            visible: Boolean(card && !card.hidden && getComputedStyle(card).display !== "none"),
+            query: root?.querySelector(".context-query")?.textContent || "",
+            meaning: root?.querySelector(".chinese-meaning")?.textContent || "",
+            definition: root?.querySelector(".definition")?.textContent || "",
+            modes: [...(root?.querySelectorAll(".mode-button") || [])].map((button) => button.textContent),
+            activeMode: root?.querySelector('.mode-button[data-active="true"]')?.textContent || ""
+          };
+          const passed = result.visible &&
+            result.query === "it was quite patronizing" &&
+            result.meaning.includes("居高临下") &&
+            result.definition.includes("condescending") &&
+            result.modes.includes("quite patronizing") &&
+            result.activeMode === "语境";
+          document.documentElement.dataset.wordCardResult = passed ? "pass" : "fail";
+          document.getElementById("qa-output").textContent = JSON.stringify(result);
+        }, 900);
+      }, 120);
     }, 80);
   </script>
 </body>

@@ -47,6 +47,25 @@ assert.equal(clock.snapshot().source, "status");
 clock.calibrate({ seconds: 2822, nowMs: 60_000, playing: true, rate: 1.25, source: "timeline" });
 closeTo(clock.read(62_000), 2824.5);
 
+const seekGate = core.createSeekGate({ settleMs: 60, minimumJump: 0.75 });
+seekGate.begin({ seconds: 100, nowMs: 1_000 });
+assert.equal(seekGate.canRender({ seconds: 100, nowMs: 1_020, segmentsReady: true }), false);
+seekGate.calibrate({ seconds: 100, nowMs: 1_030 });
+assert.equal(
+  seekGate.canRender({ seconds: 100, nowMs: 1_200, segmentsReady: true }),
+  false,
+  "An unchanged pre-seek clock must not re-display the old caption"
+);
+seekGate.calibrate({ seconds: 110, nowMs: 1_210 });
+assert.equal(seekGate.canRender({ seconds: 110, nowMs: 1_250, segmentsReady: true }), false);
+assert.equal(
+  seekGate.canRender({ seconds: 110, nowMs: 1_280, segmentsReady: false }),
+  false,
+  "A new clock alone is insufficient while its subtitle segment is still loading"
+);
+assert.equal(seekGate.canRender({ seconds: 110, nowMs: 1_280, segmentsReady: true }), true);
+assert.equal(seekGate.snapshot().active, false);
+
 assert.equal(core.parseAccessibleClock("Playback resumed."), null);
 assert.equal(core.parseAccessibleClock("Paused at 0."), 0);
 assert.equal(core.parseTimelineClock({ now: "1336", min: "0", max: "3318" }), 1336);
@@ -159,12 +178,82 @@ assert.deepEqual(dictionary.parseDictionaryResponse(dictionaryPayload), {
   example: "A regional variant."
 });
 assert.equal(dictionary.parseTranslationResponse({ responseData: { translatedText: "变体" } }), "变体");
+assert.equal(
+  dictionary.parseTranslationResponse({
+    responseData: { translatedText: "https://mymemory.translated.net/doc/spec.php" }
+  }),
+  "",
+  "A translator URL must never be rendered as a Chinese meaning"
+);
+assert.equal(
+  dictionary.parseTranslationResponse({
+    responseData: { translatedText: "https://example.com/error" },
+    matches: [
+      { translation: "www.example.com" },
+      { translation: "居高临下的" }
+    ]
+  }),
+  "居高临下的",
+  "A clean Chinese candidate should replace a polluted primary response"
+);
+assert.equal(
+  dictionary.parseGoogleTranslationResponse([
+    [["相当居高临下", "quite patronizing", null, null]]
+  ]),
+  "相当居高临下"
+);
+assert.equal(
+  dictionary.parseGoogleTranslationResponse([
+    [["https://translate.google.com/", "quite patronizing", null, null]]
+  ]),
+  "",
+  "Google fallback responses need the same output validation"
+);
 assert.equal(dictionary.normalizeLookupWord("Variants!"), "variants");
 assert.equal(dictionary.normalizeLookupWord("123"), "");
 
+const patronizingPayload = [{
+  word: "patronizing",
+  phonetic: "/ˈpætɹənaɪzɪŋ/",
+  meanings: [
+    {
+      partOfSpeech: "verb",
+      definitions: [{ definition: "To act as a patron of; to defend, protect, or support." }]
+    },
+    {
+      partOfSpeech: "adjective",
+      definitions: [{ definition: "Offensively condescending." }]
+    }
+  ]
+}];
+assert.equal(
+  dictionary.parseDictionaryResponse(patronizingPayload, "adjective").definition,
+  "Offensively condescending.",
+  "Contextual part-of-speech hints must beat the first unrelated dictionary sense"
+);
+
+assert.deepEqual(
+  core.buildLookupOptions("Yes, it was quite patronizing.", 4),
+  [
+    { mode: "context", label: "语境", text: "it was quite patronizing", partHint: "adjective" },
+    { mode: "phrase", label: "短语", text: "quite patronizing", partHint: "adjective" },
+    { mode: "word", label: "单词", text: "patronizing", partHint: "adjective" }
+  ],
+  "The default lookup must carry enough context to disambiguate patronizing"
+);
+assert.deepEqual(
+  core.buildLookupOptions("We need to figure it out.", 3).map((option) => option.text),
+  ["We need to figure it out", "figure it out", "figure"],
+  "Separable phrasal verbs should stay together"
+);
+
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "manifest.json"), "utf8"));
+const pageAdapterSource = fs.readFileSync(path.join(__dirname, "page-adapter.js"), "utf8");
+assert.match(pageAdapterSource, /const seekGate = core\.createSeekGate/);
+assert.match(pageAdapterSource, /addEventListener\("seeking", onSeeking/);
+assert.match(pageAdapterSource, /seekGate\.canRender\(/);
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.0.3");
+assert.equal(manifest.version, "1.1.0");
 for (const script of [
   manifest.background.service_worker,
   manifest.action.default_popup,
@@ -183,7 +272,7 @@ async function testBackgroundRefreshesOpenDisneyTabs() {
     runtime: {
       onInstalled: { addListener(listener) { onInstalled = listener; } },
       onMessage: { addListener() {} },
-      getManifest() { return { version: "1.0.3" }; }
+      getManifest() { return { version: "1.1.0" }; }
     },
     storage: {
       sync: {
@@ -236,6 +325,122 @@ async function testBackgroundRefreshesOpenDisneyTabs() {
   );
 }
 
-testBackgroundRefreshesOpenDisneyTabs().then(() => {
-  console.log("Disney Language Lens 1.0.3 tests passed.");
-});
+async function testBackgroundUsesContextAndSafeFallbacks() {
+  const backgroundSource = fs.readFileSync(path.join(__dirname, "background.js"), "utf8");
+  let onMessage = null;
+  const requests = [];
+  const localState = {};
+  const dictionaryPayload = [{
+    word: "patronizing",
+    phonetic: "/ˈpætɹənaɪzɪŋ/",
+    meanings: [
+      { partOfSpeech: "verb", definitions: [{ definition: "To act as a patron of." }] },
+      { partOfSpeech: "adjective", definitions: [{ definition: "Offensively condescending." }] }
+    ]
+  }];
+  const fakeFetch = async (url) => {
+    requests.push(String(url));
+    if (String(url).includes("api.dictionaryapi.dev")) {
+      return { ok: true, async json() { return dictionaryPayload; } };
+    }
+    if (String(url).includes("translate.googleapis.com")) {
+      const query = new URL(String(url)).searchParams.get("q");
+      const translated = query === "link bug" ? "https://translate.google.com/error" : "相当居高临下";
+      return { ok: true, async json() { return [[[translated, query, null, null]]]; } };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const chrome = {
+    runtime: {
+      onInstalled: { addListener() {} },
+      onMessage: { addListener(listener) { onMessage = listener; } },
+      getManifest() { return { version: "1.1.0" }; }
+    },
+    storage: {
+      sync: { async get(defaults) { return defaults; }, async set() {} },
+      local: {
+        async get(key) {
+          if (typeof key === "string") return { [key]: localState[key] };
+          return { ...localState };
+        },
+        async set(value) { Object.assign(localState, value); },
+        async remove(keys) { for (const key of [].concat(keys || [])) delete localState[key]; }
+      }
+    },
+    tabs: { async query() { return []; }, async reload() {} }
+  };
+  const context = {
+    chrome,
+    console,
+    fetch: fakeFetch,
+    URL,
+    Date,
+    setTimeout,
+    clearTimeout,
+    DisneyLanguageLensDictionary: dictionary,
+    importScripts() {}
+  };
+  context.globalThis = context;
+  vm.runInNewContext(backgroundSource, context, { filename: "background.js" });
+  assert.equal(typeof onMessage, "function");
+
+  async function send(message) {
+    return new Promise((resolve, reject) => {
+      try {
+        const keepAlive = onMessage(message, {}, resolve);
+        assert.equal(keepAlive, true, `Background did not accept ${message.type}`);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  const contextual = await send({
+    type: "lookup-context",
+    word: "patronizing",
+    query: "quite patronizing",
+    mode: "phrase",
+    partHint: "adjective",
+    officialChinese: "是的，你这是自以为高人一等。",
+    targetLanguage: "zh-Hans"
+  });
+  assert.equal(contextual.ok, true);
+  assert.equal(contextual.result.query, "quite patronizing");
+  assert.equal(contextual.result.chinese, "相当居高临下");
+  assert.equal(contextual.result.definition, "Offensively condescending.");
+  assert.equal(contextual.result.translationSource, "google-context");
+  assert.ok(
+    requests.some((url) => url.includes("q=quite+patronizing") || url.includes("q=quite%20patronizing")),
+    "The cloud translator must receive the contextual phrase"
+  );
+  assert.ok(!requests.some((url) => url.includes("mymemory")), "The known-bad single-word translator must not be used");
+
+  const safeFallback = await send({
+    type: "lookup-context",
+    word: "patronizing",
+    query: "link bug",
+    mode: "context",
+    partHint: "adjective",
+    officialChinese: "你这是自以为高人一等。",
+    targetLanguage: "zh-Hans"
+  });
+  assert.equal(safeFallback.ok, true);
+  assert.equal(safeFallback.result.chinese, "你这是自以为高人一等。");
+  assert.equal(safeFallback.result.translationSource, "disney-official");
+  assert.ok(!safeFallback.result.chinese.includes("http"));
+  assert.ok(
+    Object.keys(localState).every((key) => !key.startsWith("dictionary:v1:")),
+    "Version 1 URL-polluted cache entries must never be reused"
+  );
+}
+
+Promise.resolve()
+  .then(testBackgroundRefreshesOpenDisneyTabs)
+  .then(testBackgroundUsesContextAndSafeFallbacks)
+  .then(() => {
+    console.log("Disney Language Lens 1.1.0 tests passed.");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

@@ -287,6 +287,69 @@
     return { read, calibrate, setPlayback, invalidate, snapshot };
   }
 
+  function createSeekGate(options = {}) {
+    const settleMs = Math.max(0, Number(options.settleMs) || 60);
+    const minimumJump = Math.max(0.1, Number(options.minimumJump) || 0.75);
+    const maxHoldMs = Math.max(500, Number(options.maxHoldMs) || 2200);
+    let state = {
+      active: false,
+      baseline: null,
+      target: null,
+      startedAt: null,
+      calibratedAt: null
+    };
+
+    function begin(input = {}) {
+      if (state.active) return false;
+      const seconds = Number(input.seconds);
+      const nowMs = Number(input.nowMs);
+      state = {
+        active: true,
+        baseline: Number.isFinite(seconds) ? seconds : null,
+        target: null,
+        startedAt: Number.isFinite(nowMs) ? nowMs : 0,
+        calibratedAt: null
+      };
+      return true;
+    }
+
+    function calibrate(input = {}) {
+      if (!state.active) return false;
+      const seconds = Number(input.seconds);
+      const nowMs = Number(input.nowMs);
+      if (!Number.isFinite(seconds) || !Number.isFinite(nowMs)) return false;
+      if (Number.isFinite(state.baseline) && Math.abs(seconds - state.baseline) < minimumJump) return false;
+      if (!Number.isFinite(state.target) || Math.abs(seconds - state.target) >= 0.25) {
+        state.target = seconds;
+        state.calibratedAt = nowMs;
+      }
+      return true;
+    }
+
+    function canRender(input = {}) {
+      if (!state.active) return true;
+      const seconds = Number(input.seconds);
+      const nowMs = Number(input.nowMs);
+      const timedOutWithoutJump = !Number.isFinite(state.target) &&
+        Number.isFinite(nowMs) && nowMs - state.startedAt >= maxHoldMs;
+      if (timedOutWithoutJump && input.segmentsReady) {
+        state.active = false;
+        return true;
+      }
+      if (!Number.isFinite(state.target) || !Number.isFinite(seconds) || !Number.isFinite(nowMs)) return false;
+      if (Math.abs(seconds - state.target) >= minimumJump) return false;
+      if (!input.segmentsReady || nowMs - state.calibratedAt < settleMs) return false;
+      state.active = false;
+      return true;
+    }
+
+    function snapshot() {
+      return { ...state };
+    }
+
+    return { begin, calibrate, canRender, snapshot };
+  }
+
   function tokenizeEnglish(text) {
     const source = String(text || "");
     const tokens = [];
@@ -300,6 +363,117 @@
     }
     if (cursor < source.length) tokens.push({ type: "text", text: source.slice(cursor) });
     return tokens;
+  }
+
+  function englishWordSpans(text) {
+    const source = String(text || "");
+    const words = [];
+    const pattern = /[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+    let match;
+    while ((match = pattern.exec(source))) {
+      words.push({
+        text: match[0],
+        lookup: match[0].toLowerCase().replace(/’/g, "'"),
+        start: match.index,
+        end: match.index + match[0].length
+      });
+    }
+    return words;
+  }
+
+  function inferPartOfSpeech(words, index) {
+    const word = words[index]?.lookup || "";
+    const previous = words[index - 1]?.lookup || "";
+    const previousTwo = words[index - 2]?.lookup || "";
+    const next = words[index + 1]?.lookup || "";
+    const copulas = new Set(["am", "is", "are", "was", "were", "be", "been", "being", "seem", "seems", "seemed", "feel", "feels", "felt"]);
+    const intensifiers = new Set(["very", "quite", "rather", "so", "too", "extremely", "really", "pretty", "more", "most"]);
+    const verbLeads = new Set(["to", "can", "could", "will", "would", "shall", "should", "must", "may", "might", "do", "does", "did"]);
+    const determiners = new Set(["a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "our", "their"]);
+    if ((word.endsWith("ing") || word.endsWith("ed")) &&
+        (copulas.has(previous) || intensifiers.has(previous) || copulas.has(previousTwo))) return "adjective";
+    if (word.endsWith("ly") && !["friendly", "lovely", "lonely", "likely"].includes(word)) return "adverb";
+    if (verbLeads.has(previous)) return "verb";
+    if (determiners.has(previous) && next !== "") return "noun";
+    return "";
+  }
+
+  function cleanContextText(value) {
+    return String(value || "")
+      .replace(/^[\s,;:.!?—–-]+|[\s,;:.!?—–-]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function buildLookupOptions(text, wordIndex) {
+    const source = String(text || "");
+    const words = englishWordSpans(source);
+    const index = Number(wordIndex);
+    const selected = words[index];
+    if (!selected) return [];
+
+    const boundaryPattern = /[\n.!?;:,]/;
+    let leftBoundary = -1;
+    for (let cursor = selected.start - 1; cursor >= 0; cursor -= 1) {
+      if (boundaryPattern.test(source[cursor])) {
+        leftBoundary = cursor;
+        break;
+      }
+    }
+    let rightBoundary = source.length;
+    for (let cursor = selected.end; cursor < source.length; cursor += 1) {
+      if (boundaryPattern.test(source[cursor])) {
+        rightBoundary = cursor;
+        break;
+      }
+    }
+
+    const clauseWords = words.filter((word) => word.start > leftBoundary && word.end <= rightBoundary);
+    const clauseIndex = clauseWords.findIndex((word) => word.start === selected.start);
+    let contextWords = clauseWords;
+    if (clauseWords.length > 9) {
+      const start = Math.max(0, Math.min(clauseWords.length - 9, clauseIndex - 4));
+      contextWords = clauseWords.slice(start, start + 9);
+    }
+    const context = cleanContextText(
+      source.slice(contextWords[0]?.start ?? selected.start, contextWords.at(-1)?.end ?? selected.end)
+    );
+
+    const particles = new Set(["up", "out", "off", "on", "over", "away", "back", "down", "in", "into", "through", "around", "along", "for", "after", "to", "with", "from", "at", "about"]);
+    const objectPronouns = new Set(["it", "them", "him", "her", "me", "you", "us"]);
+    const intensifiers = new Set(["very", "quite", "rather", "so", "too", "extremely", "really", "pretty", "more", "most"]);
+    let phraseWords = [selected];
+    const previous = clauseWords[clauseIndex - 1];
+    const next = clauseWords[clauseIndex + 1];
+    const nextTwo = clauseWords[clauseIndex + 2];
+    if (next && objectPronouns.has(next.lookup) && nextTwo && particles.has(nextTwo.lookup)) {
+      phraseWords = [selected, next, nextTwo];
+    } else if (next && particles.has(next.lookup)) {
+      phraseWords = [selected, next];
+    } else if (previous && (particles.has(selected.lookup) || intensifiers.has(previous.lookup) || clauseIndex === clauseWords.length - 1)) {
+      phraseWords = [previous, selected];
+    } else if (next) {
+      phraseWords = [selected, next];
+    } else if (previous) {
+      phraseWords = [previous, selected];
+    }
+    const phrase = cleanContextText(
+      source.slice(phraseWords[0].start, phraseWords.at(-1).end)
+    );
+    const word = selected.text;
+    const partHint = inferPartOfSpeech(words, index);
+    const candidates = [
+      { mode: "context", label: "语境", text: context, partHint },
+      { mode: "phrase", label: "短语", text: phrase, partHint },
+      { mode: "word", label: "单词", text: word, partHint }
+    ];
+    const seen = new Set();
+    return candidates.filter((option) => {
+      const key = option.text.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function formatClock(seconds) {
@@ -326,7 +500,9 @@
     parseAccessibleClock,
     parseTimelineClock,
     createPlaybackClock,
+    createSeekGate,
     tokenizeEnglish,
+    buildLookupOptions,
     formatClock
   };
 });

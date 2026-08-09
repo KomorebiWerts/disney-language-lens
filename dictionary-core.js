@@ -43,11 +43,15 @@
     return /^https:\/\//i.test(String(value)) ? String(value) : "";
   }
 
-  function parseDictionaryResponse(payload) {
+  function parseDictionaryResponse(payload, preferredPartOfSpeech = "") {
     const entries = Array.isArray(payload) ? payload : [];
     for (const entry of entries) {
       const phoneticRecord = (entry.phonetics || []).find((item) => item?.text || item?.audio) || {};
-      const meaning = (entry.meanings || []).find((item) => item?.definitions?.some((definition) => definition?.definition));
+      const meanings = (entry.meanings || []).filter((item) =>
+        item?.definitions?.some((definition) => definition?.definition)
+      );
+      const preferred = String(preferredPartOfSpeech || "").toLowerCase();
+      const meaning = meanings.find((item) => String(item.partOfSpeech || "").toLowerCase() === preferred) || meanings[0];
       const definition = meaning?.definitions?.find((item) => item?.definition);
       if (!meaning && !phoneticRecord.text && !entry.phonetic) continue;
       return {
@@ -72,15 +76,42 @@
       .replace(/&gt;/gi, ">");
   }
 
+  function cleanTranslation(value) {
+    const text = decodeBasicEntities(value)
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text || text.length > 500) return "";
+    if (/(?:https?:\/\/|www\.|data:|javascript:|ftp:\/\/)/i.test(text)) return "";
+    if (/<\/?[a-z][^>]*>/i.test(text)) return "";
+    if (/\b(?:error|warning|quota|limit exceeded|invalid request|access denied|not found)\b/i.test(text)) return "";
+    if (!/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(text)) return "";
+    return text;
+  }
+
   function parseTranslationResponse(payload) {
     if (Number(payload?.responseStatus) && Number(payload.responseStatus) !== 200) return "";
-    return decodeBasicEntities(payload?.responseData?.translatedText).trim();
+    const candidates = [
+      payload?.responseData?.translatedText,
+      ...(Array.isArray(payload?.matches) ? payload.matches.map((match) => match?.translation) : [])
+    ];
+    for (const candidate of candidates) {
+      const cleaned = cleanTranslation(candidate);
+      if (cleaned) return cleaned;
+    }
+    return "";
+  }
+
+  function parseGoogleTranslationResponse(payload) {
+    const segments = Array.isArray(payload?.[0]) ? payload[0] : [];
+    return cleanTranslation(segments.map((segment) => segment?.[0] || "").join(""));
   }
 
   return {
     normalizeLookupWord,
     lookupCandidates,
     parseDictionaryResponse,
-    parseTranslationResponse
+    cleanTranslation,
+    parseTranslationResponse,
+    parseGoogleTranslationResponse
   };
 });

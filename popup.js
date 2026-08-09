@@ -1,7 +1,7 @@
 // An unpacked Chromium extension keeps its old manifest until the extension is
 // reloaded. Opening this page is therefore also a safe upgrade bridge for the
 // already-installed Chrome/Edge copy that points at this folder.
-if (chrome.runtime.getManifest().version !== "1.0.3") {
+if (chrome.runtime.getManifest().version !== "1.1.0") {
   chrome.runtime.reload();
 }
 
@@ -83,7 +83,7 @@ function showStatus(status) {
     elements.statusDot.classList.add("warn");
     elements.statusTitle.textContent = stale ? "播放器状态已过期" : (status.message || "正在连接播放器");
     elements.statusDetail.textContent = stale
-      ? "请刷新当前 Disney+ 影片页面，让 1.0 插件重新接管。"
+      ? "请刷新当前 Disney+ 影片页面，让 1.1 插件重新接管。"
       : (status.detail || "正在等待字幕轨道和全局时间。");
   }
 }
