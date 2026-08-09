@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Language Lens UI QA</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #02050a; }
+    .frame {
+      position: fixed; inset: 5vh 2vw 7vh;
+      background:
+        radial-gradient(circle at 50% 36%, rgba(226,190,133,.36), transparent 16%),
+        linear-gradient(90deg, rgba(4,7,11,.94) 0 13%, transparent 26% 78%, rgba(4,7,11,.92) 92%),
+        linear-gradient(155deg, #17202b, #394241 42%, #101820 76%);
+      box-shadow: inset 0 0 110px #000, 0 0 0 8vh #000;
+    }
+    .figure { position:absolute; bottom:0; width:21%; height:68%; border-radius:48% 48% 5% 5%; background:linear-gradient(#2b2422,#090b0e 72%); filter:blur(2px); }
+    .figure.one { left:23%; transform:rotate(-4deg); }
+    .figure.two { right:23%; height:75%; transform:rotate(3deg); }
+    .time { position:fixed; right:3vw; bottom:4vh; color:#dfe9ef; font:14px Segoe UI,sans-serif; }
+  </style>
+</head>
+<body>
+  <div class="frame"><div class="figure one"></div><div class="figure two"></div></div>
+  <div class="time">30:27 / 55:18</div>
+  <script>
+    window.chrome = {
+      storage: {
+        sync: {
+          get: async (defaults) => defaults
+        },
+        local: {
+          set: async () => undefined
+        },
+        onChanged: {
+          addListener: () => undefined
+        }
+      },
+      runtime: {
+        sendMessage: async ({ word }) => ({
+          ok: true,
+          result: {
+            word,
+            chinese: word === "variant" ? "变体；时间犯" : "结束；结局",
+            phonetic: word === "variant" ? "/ˈvɛəriənt/" : "/end/",
+            partOfSpeech: "noun",
+            definition: word === "variant" ? "Something slightly different from a type or norm." : "The final part of something.",
+            example: word === "variant" ? "This Variant left the Sacred Timeline." : "How does it all end?",
+            audio: ""
+          }
+        })
+      }
+    };
+  </script>
+  <script src="../core.js"></script>
+  <script src="../content-ui.js"></script>
+  <script>
+    setTimeout(() => {
+      window.postMessage({
+        channel: "disney-language-lens:v1",
+        sender: "page-adapter",
+        type: "health",
+        ready: true,
+        displayTime: "30:27",
+        clockSource: "timeline",
+        englishTrack: "English [CC]",
+        chineseTrack: "Chinese (Simplified)"
+      }, "*");
+      window.postMessage({
+        channel: "disney-language-lens:v1",
+        sender: "page-adapter",
+        type: "caption",
+        english: "How does it all end? Every Variant has a choice.",
+        chinese: "那这一切怎么结束？每个时间犯都有选择。"
+      }, "*");
+    }, 80);
+  </script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disney+ 双语学习字幕</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="hero">
+      <div class="eyebrow"><span class="brand-mark" aria-hidden="true"></span> LANGUAGE LENS</div>
+      <h1>Disney+ 双语学习字幕</h1>
+      <p>官方英中字幕 · 单词悬停释义</p>
+    </header>
+
+    <section class="status-card" aria-live="polite">
+      <div class="status-head">
+        <span id="statusDot" class="status-dot"></span>
+        <strong id="statusTitle">正在读取播放器状态</strong>
+      </div>
+      <div id="statusDetail" class="status-detail">打开 Disney+ 影片后会自动连接。</div>
+    </section>
+
+    <section class="settings-card">
+      <label class="master-row" for="enabled">
+        <span>
+          <strong>启用双语字幕</strong>
+          <small>使用影片自带的英文与中文轨道</small>
+        </span>
+        <span class="switch"><input id="enabled" type="checkbox"><span></span></span>
+      </label>
+
+      <div class="divider"></div>
+
+      <label class="field-row" for="chinese">
+        <span>中文字幕</span>
+        <select id="chinese">
+          <option value="zh-Hans">简体中文</option>
+          <option value="zh-Hant">繁体中文</option>
+        </select>
+      </label>
+
+      <label class="field-row" for="englishFirst">
+        <span>显示顺序</span>
+        <select id="englishFirst">
+          <option value="true">英文在上</option>
+          <option value="false">中文在上</option>
+        </select>
+      </label>
+
+      <label class="field-row" for="hoverEnabled">
+        <span>
+          悬停单词解释
+          <small>中文释义、音标、英文简释和发音</small>
+        </span>
+        <span class="switch compact"><input id="hoverEnabled" type="checkbox"><span></span></span>
+      </label>
+
+      <label class="range-row" for="fontSize">
+        <span>字幕字号</span><output id="fontSizeValue">30</output>
+        <input id="fontSize" type="range" min="20" max="54" step="1">
+      </label>
+
+      <label class="range-row" for="bottom">
+        <span>距底部</span><output id="bottomValue">12%</output>
+        <input id="bottom" type="range" min="5" max="30" step="1">
+      </label>
+    </section>
+
+    <aside class="privacy-note">
+      <span aria-hidden="true">◉</span>
+      释义功能只发送你悬停的单个英文词，不发送字幕句子或观看记录；结果会缓存在本机。
+    </aside>
+
+    <footer>
+      <span>版本 1.0.3</span>
+      <span>Chrome / Microsoft Edge</span>
+    </footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

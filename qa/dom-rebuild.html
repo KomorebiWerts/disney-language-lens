@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Disney Language Lens DOM rebuild regression</title>
+</head>
+<body data-result="pending">
+  <main id="disney-app">Mock Disney player</main>
+  <output id="result">pending</output>
+  <script>
+    window.chrome = {
+      storage: {
+        sync: { get: async (defaults) => defaults },
+        local: { set: async () => undefined },
+        onChanged: { addListener: () => undefined }
+      },
+      runtime: {
+        sendMessage: async () => ({ ok: false, error: "not used" })
+      }
+    };
+  </script>
+  <script src="../core.js"></script>
+  <script>
+    const testParams = new URLSearchParams(location.search);
+    if (testParams.has("withoutCore")) window.DisneyLanguageLensCore = undefined;
+    const uiScript = document.createElement("script");
+    uiScript.src = testParams.has("release")
+      ? "../../../outputs/disney-dual-subtitles/content-ui.js?v=before-mount-guard"
+      : "../content-ui.js?v=mount-guard";
+    document.head.appendChild(uiScript);
+  </script>
+  <script>
+    const channel = "disney-language-lens:v1";
+    setTimeout(() => {
+      window.postMessage({
+        channel,
+        sender: "page-adapter",
+        type: "caption",
+        english: "What could possibly go wrong?",
+        chinese: "能有什么问题呢？"
+      }, "*");
+    }, 50);
+
+    // Disney replaces a player container after the extension has rendered.
+    // No new caption event follows, so the overlay must heal independently.
+    setTimeout(() => {
+      document.getElementById("disney-language-lens-root")?.remove();
+    }, 200);
+
+    setTimeout(() => {
+      const root = document.getElementById("disney-language-lens-root");
+      const captions = root?.shadowRoot?.querySelector(".captions");
+      const english = root?.shadowRoot?.querySelector(".english")?.textContent || "";
+      const chinese = root?.shadowRoot?.querySelector(".chinese")?.textContent || "";
+      const rect = captions?.getBoundingClientRect();
+      const passed = Boolean(
+        root?.isConnected &&
+        captions &&
+        !captions.hidden &&
+        english.includes("What could possibly go wrong?") &&
+        chinese.includes("能有什么问题呢？") &&
+        rect?.width > 0 &&
+        rect?.height > 0 &&
+        getComputedStyle(captions).display !== "none"
+      );
+      document.body.dataset.result = passed ? "pass" : "fail";
+      document.getElementById("result").textContent = passed
+        ? "PASS: visible bilingual subtitle overlay remounted"
+        : "FAIL: bilingual subtitle overlay is not visibly rendered";
+    }, 1400);
+  </script>
+</body>
+</html>
